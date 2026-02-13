@@ -1,23 +1,97 @@
 import os
 import json
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 from google import genai
 from google.genai import types
+import database
 
 # Initialize Flask with current directory for templates and static files
 app = Flask(__name__, template_folder='.', static_folder='.')
+app.secret_key = os.environ.get("SECRET_KEY", "dev_secret_key_change_in_prod")
+
+# Initialize Database
+database.init_db()
 
 # Initialize Gemini Client
-# We use standard os.environ for Python.
 client = genai.Client(api_key=os.environ.get("API_KEY"))
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# --- Auth Routes ---
+
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({"error": "Missing credentials"}), 400
+        
+    user_id = database.create_user(username, password)
+    if user_id:
+        session['user_id'] = user_id
+        session['username'] = username
+        return jsonify({"message": "User created", "username": username})
+    else:
+        return jsonify({"error": "Username already exists"}), 409
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    user_id = database.verify_user(username, password)
+    if user_id:
+        session['user_id'] = user_id
+        session['username'] = username
+        return jsonify({"message": "Logged in", "username": username})
+    else:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logged out"})
+
+@app.route('/api/check_session', methods=['GET'])
+def check_session():
+    if 'user_id' in session:
+        return jsonify({"logged_in": True, "username": session['username']})
+    return jsonify({"logged_in": False})
+
+# --- Data Routes ---
+
+@app.route('/api/plan', methods=['GET', 'POST'])
+def handle_plan():
+    if 'user_id' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+        
+    user_id = session['user_id']
+    
+    if request.method == 'POST':
+        plan_data = request.json
+        database.save_user_plan(user_id, plan_data)
+        return jsonify({"message": "Plan saved"})
+        
+    elif request.method == 'GET':
+        plan = database.get_user_plan(user_id)
+        if plan:
+            return jsonify(plan)
+        else:
+            return jsonify(None) # No plan yet
+
+# --- AI Route ---
+
 @app.route('/generate', methods=['POST'])
 def generate_plan():
+    if 'user_id' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+
     try:
         data = request.json
         subject = data.get('subject')

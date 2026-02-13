@@ -1,9 +1,11 @@
 
 // State
 let appState = {
+    user: null, // { username: string }
     plan: null,
     loading: false,
-    difficulty: 'Intermediate'
+    difficulty: 'Intermediate',
+    authMode: 'login' // 'login' or 'signup'
 };
 
 // Utils
@@ -19,11 +21,23 @@ function formatDate(dateString) {
 
 // DOM Elements
 const views = {
+    auth: document.getElementById('auth-view'),
     generator: document.getElementById('generator-view'),
     dashboard: document.getElementById('dashboard-view')
 };
 
 const elements = {
+    // Auth Elements
+    authForm: document.getElementById('auth-form'),
+    authTitle: document.getElementById('auth-title'),
+    authSubtitle: document.getElementById('auth-subtitle'),
+    authSubmitBtn: document.getElementById('auth-submit-btn'),
+    authToggleBtn: document.getElementById('auth-toggle-btn'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    logoutBtn: document.getElementById('logout-btn'),
+
+    // Generator Elements
     form: document.getElementById('plan-form'),
     subject: document.getElementById('subject'),
     goal: document.getElementById('goal'),
@@ -36,7 +50,7 @@ const elements = {
     errorMessage: document.getElementById('error-message'),
     difficultyBtns: document.querySelectorAll('#difficulty-selector button'),
     
-    // Dashboard
+    // Dashboard Elements
     planSubject: document.getElementById('plan-subject'),
     planGoal: document.getElementById('plan-goal'),
     planDuration: document.getElementById('plan-duration'),
@@ -57,7 +71,7 @@ const elements = {
 };
 
 // Initialization
-function init() {
+async function init() {
     // Set default dates
     const today = new Date();
     const nextWeek = new Date(today);
@@ -68,26 +82,136 @@ function init() {
         elements.endDate.valueAsDate = nextWeek;
     }
 
-    // Load saved plan
-    const saved = localStorage.getItem('mindArchitect_plan');
-    if (saved) {
-        try {
-            appState.plan = JSON.parse(saved);
-            renderDashboard();
-        } catch (e) {
-            console.error(e);
-            localStorage.removeItem('mindArchitect_plan');
-        }
-    } else {
-        showView('generator');
-    }
+    await checkSession();
 
     if (window.lucide) {
         lucide.createIcons();
     }
 }
 
+// --- Auth Logic ---
+
+async function checkSession() {
+    try {
+        const res = await fetch('/api/check_session');
+        const data = await res.json();
+        
+        if (data.logged_in) {
+            appState.user = { username: data.username };
+            elements.logoutBtn.classList.remove('hidden');
+            await loadPlanFromServer();
+        } else {
+            showView('auth');
+        }
+    } catch (e) {
+        console.error("Session check failed", e);
+        showView('auth');
+    }
+}
+
+async function handleAuth(e) {
+    e.preventDefault();
+    const username = elements.authUsername.value;
+    const password = elements.authPassword.value;
+    const endpoint = appState.authMode === 'login' ? '/api/login' : '/api/signup';
+    
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            appState.user = { username: data.username };
+            elements.logoutBtn.classList.remove('hidden');
+            // Clear inputs
+            elements.authUsername.value = '';
+            elements.authPassword.value = '';
+            await loadPlanFromServer();
+        } else {
+            showError(data.error || "Authentication failed");
+        }
+    } catch (err) {
+        showError("Network error occurred");
+    }
+}
+
+async function logout() {
+    await fetch('/api/logout', { method: 'POST' });
+    appState.user = null;
+    appState.plan = null;
+    elements.logoutBtn.classList.add('hidden');
+    elements.navSubject.innerText = '';
+    showView('auth');
+}
+
+function toggleAuthMode() {
+    appState.authMode = appState.authMode === 'login' ? 'signup' : 'login';
+    if (appState.authMode === 'login') {
+        elements.authTitle.innerText = "Welcome Back";
+        elements.authSubtitle.innerText = "Sign in to access your study plans";
+        elements.authSubmitBtn.innerText = "Sign In";
+        elements.authToggleBtn.innerText = "Need an account? Create one";
+    } else {
+        elements.authTitle.innerText = "Create Account";
+        elements.authSubtitle.innerText = "Start your learning journey today";
+        elements.authSubmitBtn.innerText = "Sign Up";
+        elements.authToggleBtn.innerText = "Already have an account? Sign In";
+    }
+}
+
+
+// --- Data Persistence (Server) ---
+
+async function loadPlanFromServer() {
+    try {
+        const res = await fetch('/api/plan');
+        if (res.ok) {
+            const plan = await res.json();
+            if (plan) {
+                appState.plan = plan;
+                renderDashboard();
+            } else {
+                showView('generator');
+            }
+        }
+    } catch (e) {
+        console.error(e);
+        showView('generator');
+    }
+}
+
+async function savePlanToServer() {
+    if (!appState.plan) return;
+    
+    // Recalculate stats first
+    const totalCompleted = appState.plan.days.reduce((acc, day) => 
+        acc + day.tasks.filter(t => t.completed).length, 0
+    );
+    appState.plan.completedTasks = totalCompleted;
+
+    try {
+        await fetch('/api/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(appState.plan)
+        });
+    } catch (e) {
+        console.error("Failed to save plan", e);
+    }
+}
+
+
+// --- UI Logic ---
+
 // Event Listeners
+if (elements.authForm) elements.authForm.addEventListener('submit', handleAuth);
+if (elements.authToggleBtn) elements.authToggleBtn.addEventListener('click', (e) => { e.preventDefault(); toggleAuthMode(); });
+if (elements.logoutBtn) elements.logoutBtn.addEventListener('click', logout);
+
 if (elements.difficultyBtns) {
     elements.difficultyBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -105,10 +229,12 @@ if (elements.form) {
 }
 
 if (elements.resetBtn) {
-    elements.resetBtn.addEventListener('click', () => {
+    elements.resetBtn.addEventListener('click', async () => {
         if (confirm("Are you sure you want to delete this study plan?")) {
             appState.plan = null;
-            localStorage.removeItem('mindArchitect_plan');
+            // We save the null/empty plan logic by just overriding the existing one or handling it in backend. 
+            // For simplicity, we just send a new empty plan or handle it next time a plan is generated.
+            // For now, let's just show generator. The next save will overwrite.
             showView('generator');
         }
     });
@@ -117,7 +243,7 @@ if (elements.resetBtn) {
 if (elements.tabSchedule) elements.tabSchedule.addEventListener('click', () => switchTab('schedule'));
 if (elements.tabAnalytics) elements.tabAnalytics.addEventListener('click', () => switchTab('analytics'));
 
-// Logic
+
 function updateDifficultyUI() {
     elements.difficultyBtns.forEach(btn => {
         if (btn.dataset.value === appState.difficulty) {
@@ -129,12 +255,20 @@ function updateDifficultyUI() {
 }
 
 function showView(viewName) {
-    if (viewName === 'generator') {
-        if(views.generator) views.generator.classList.remove('hidden');
-        if(views.dashboard) views.dashboard.classList.add('hidden');
-    } else {
-        if(views.generator) views.generator.classList.add('hidden');
-        if(views.dashboard) views.dashboard.classList.remove('hidden');
+    // Hide all
+    Object.values(views).forEach(el => { if(el) el.classList.add('hidden'); });
+    
+    // Show target
+    if (views[viewName]) {
+        views[viewName].classList.remove('hidden');
+    }
+}
+
+function showError(msg) {
+    if(elements.errorMessage) elements.errorMessage.innerText = msg;
+    if(elements.errorToast) {
+        elements.errorToast.classList.remove('hidden');
+        setTimeout(() => elements.errorToast.classList.add('hidden'), 4000);
     }
 }
 
@@ -224,13 +358,12 @@ async function generatePlan() {
             completedTasks: 0
         };
 
-        savePlan();
+        await savePlanToServer();
         renderDashboard();
 
     } catch (err) {
         console.error(err);
-        elements.errorMessage.innerText = err.message || "Something went wrong.";
-        elements.errorToast.classList.remove('hidden');
+        showError(err.message || "Something went wrong.");
     } finally {
         setLoading(false);
     }
@@ -253,16 +386,6 @@ function setLoading(isLoading) {
     }
 }
 
-function savePlan() {
-    if (appState.plan) {
-        // Recalculate stats
-        const totalCompleted = appState.plan.days.reduce((acc, day) => 
-            acc + day.tasks.filter(t => t.completed).length, 0
-        );
-        appState.plan.completedTasks = totalCompleted;
-        localStorage.setItem('mindArchitect_plan', JSON.stringify(appState.plan));
-    }
-}
 
 function renderDashboard() {
     const plan = appState.plan;
@@ -366,14 +489,14 @@ function renderSchedule() {
     if(window.lucide) lucide.createIcons();
 }
 
-function toggleTask(dayIndex, taskId) {
+async function toggleTask(dayIndex, taskId) {
     const day = appState.plan.days[dayIndex];
     const task = day.tasks.find(t => t.id === taskId);
     if (task) {
         task.completed = !task.completed;
-        savePlan();
-        updateProgress(); // Quick update
+        updateProgress(); // Quick UI update
         renderSchedule(); // Full re-render to update classes
+        await savePlanToServer(); // Sync to DB
     }
 }
 
