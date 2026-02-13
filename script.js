@@ -63,8 +63,10 @@ function init() {
     const nextWeek = new Date(today);
     nextWeek.setDate(today.getDate() + 14);
     
-    elements.startDate.valueAsDate = today;
-    elements.endDate.valueAsDate = nextWeek;
+    if (elements.startDate && elements.endDate) {
+        elements.startDate.valueAsDate = today;
+        elements.endDate.valueAsDate = nextWeek;
+    }
 
     // Load saved plan
     const saved = localStorage.getItem('mindArchitect_plan');
@@ -80,32 +82,40 @@ function init() {
         showView('generator');
     }
 
-    lucide.createIcons();
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 }
 
 // Event Listeners
-elements.difficultyBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        appState.difficulty = btn.dataset.value;
-        updateDifficultyUI();
+if (elements.difficultyBtns) {
+    elements.difficultyBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            appState.difficulty = btn.dataset.value;
+            updateDifficultyUI();
+        });
     });
-});
+}
 
-elements.form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    await generatePlan();
-});
+if (elements.form) {
+    elements.form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await generatePlan();
+    });
+}
 
-elements.resetBtn.addEventListener('click', () => {
-    if (confirm("Are you sure you want to delete this study plan?")) {
-        appState.plan = null;
-        localStorage.removeItem('mindArchitect_plan');
-        showView('generator');
-    }
-});
+if (elements.resetBtn) {
+    elements.resetBtn.addEventListener('click', () => {
+        if (confirm("Are you sure you want to delete this study plan?")) {
+            appState.plan = null;
+            localStorage.removeItem('mindArchitect_plan');
+            showView('generator');
+        }
+    });
+}
 
-elements.tabSchedule.addEventListener('click', () => switchTab('schedule'));
-elements.tabAnalytics.addEventListener('click', () => switchTab('analytics'));
+if (elements.tabSchedule) elements.tabSchedule.addEventListener('click', () => switchTab('schedule'));
+if (elements.tabAnalytics) elements.tabAnalytics.addEventListener('click', () => switchTab('analytics'));
 
 // Logic
 function updateDifficultyUI() {
@@ -120,11 +130,11 @@ function updateDifficultyUI() {
 
 function showView(viewName) {
     if (viewName === 'generator') {
-        views.generator.classList.remove('hidden');
-        views.dashboard.classList.add('hidden');
+        if(views.generator) views.generator.classList.remove('hidden');
+        if(views.dashboard) views.dashboard.classList.add('hidden');
     } else {
-        views.generator.classList.add('hidden');
-        views.dashboard.classList.remove('hidden');
+        if(views.generator) views.generator.classList.add('hidden');
+        if(views.dashboard) views.dashboard.classList.remove('hidden');
     }
 }
 
@@ -175,7 +185,14 @@ async function generatePlan() {
             body: JSON.stringify(params)
         });
 
-        if (!response.ok) throw new Error('Failed to generate plan');
+        if (!response.ok) {
+             let errorMsg = 'Failed to generate plan';
+             try {
+                 const errData = await response.json();
+                 if (errData.error) errorMsg = errData.error;
+             } catch(e) {}
+             throw new Error(errorMsg);
+        }
         
         const data = await response.json();
         
@@ -211,6 +228,7 @@ async function generatePlan() {
         renderDashboard();
 
     } catch (err) {
+        console.error(err);
         elements.errorMessage.innerText = err.message || "Something went wrong.";
         elements.errorToast.classList.remove('hidden');
     } finally {
@@ -220,14 +238,18 @@ async function generatePlan() {
 
 function setLoading(isLoading) {
     appState.loading = isLoading;
-    elements.generateBtn.disabled = isLoading;
-    if (isLoading) {
-        elements.btnText.innerText = "Generating...";
-        elements.generateBtn.querySelector('i').classList.add('animate-spin'); // spin generic icon
-        // Replace icon logic if needed, simplifed here
-    } else {
-        elements.btnText.innerText = "Generate Plan";
-        elements.generateBtn.querySelector('i').classList.remove('animate-spin');
+    if (elements.generateBtn) {
+        elements.generateBtn.disabled = isLoading;
+        // Lucide replaces <i> with <svg>, so we try to find the SVG first (post-init), then fallback to i (pre-init)
+        const icon = elements.generateBtn.querySelector('svg') || elements.generateBtn.querySelector('i');
+        
+        if (isLoading) {
+            if(elements.btnText) elements.btnText.innerText = "Generating...";
+            if (icon) icon.classList.add('animate-spin'); 
+        } else {
+            if(elements.btnText) elements.btnText.innerText = "Generate Plan";
+            if (icon) icon.classList.remove('animate-spin');
+        }
     }
 }
 
@@ -247,11 +269,13 @@ function renderDashboard() {
     if (!plan) return;
 
     // Header Stats
-    elements.planSubject.innerText = plan.subject;
-    elements.planSubject.title = plan.subject;
-    elements.navSubject.innerText = `Current Plan: ${plan.subject}`;
-    elements.planGoal.innerText = plan.goal;
-    elements.planDuration.innerText = `${plan.days.length} Day Plan`;
+    if(elements.planSubject) {
+        elements.planSubject.innerText = plan.subject;
+        elements.planSubject.title = plan.subject;
+    }
+    if(elements.navSubject) elements.navSubject.innerText = `Current Plan: ${plan.subject}`;
+    if(elements.planGoal) elements.planGoal.innerText = plan.goal;
+    if(elements.planDuration) elements.planDuration.innerText = `${plan.days.length} Day Plan`;
 
     updateProgress();
     renderSchedule();
@@ -263,13 +287,14 @@ function updateProgress() {
     const plan = appState.plan;
     const progress = Math.round((plan.completedTasks / plan.totalTasks) * 100) || 0;
     
-    elements.progressText.innerText = `${progress}%`;
-    elements.progressBar.style.width = `${progress}%`;
-    elements.progressCircle.style.height = `${progress}%`;
+    if(elements.progressText) elements.progressText.innerText = `${progress}%`;
+    if(elements.progressBar) elements.progressBar.style.width = `${progress}%`;
+    if(elements.progressCircle) elements.progressCircle.style.height = `${progress}%`;
 }
 
 function renderSchedule() {
     const container = elements.scheduleContainer;
+    if(!container) return;
     container.innerHTML = '';
 
     appState.plan.days.forEach((day, dayIndex) => {
@@ -338,7 +363,7 @@ function renderSchedule() {
         container.appendChild(dayEl);
     });
 
-    lucide.createIcons();
+    if(window.lucide) lucide.createIcons();
 }
 
 function toggleTask(dayIndex, taskId) {
@@ -349,23 +374,24 @@ function toggleTask(dayIndex, taskId) {
         savePlan();
         updateProgress(); // Quick update
         renderSchedule(); // Full re-render to update classes
-        // Note: For better performance on large lists, update DOM directly instead of re-rendering all.
     }
 }
 
 function renderAnalytics() {
     const container = elements.analyticsChart;
     const labelsContainer = elements.analyticsLabels;
+    if(!container || !labelsContainer) return;
+    
     container.innerHTML = '';
     labelsContainer.innerHTML = '';
     
-    const maxTasks = Math.max(...appState.plan.days.map(d => d.tasks.length));
+    const maxTasks = Math.max(...appState.plan.days.map(d => d.tasks.length)) || 1;
 
     appState.plan.days.forEach(day => {
         const total = day.tasks.length;
         const completed = day.tasks.filter(t => t.completed).length;
-        const heightPercent = (total / maxTasks) * 100;
-        const completedHeightPercent = (completed / total) * 100;
+        const heightPercent = total > 0 ? (total / maxTasks) * 100 : 0;
+        const completedHeightPercent = total > 0 ? (completed / total) * 100 : 0;
 
         // Bar container
         const barWrapper = document.createElement('div');
@@ -379,7 +405,6 @@ function renderAnalytics() {
         `;
         
         // The Bar
-        // We use a stacked approach visually: Gray background for total, indigo for completed overlay
         const barBg = document.createElement('div');
         barBg.className = "w-full bg-slate-200 rounded-t-sm relative overflow-hidden transition-all duration-300";
         barBg.style.height = `${heightPercent}%`;
